@@ -1715,11 +1715,11 @@ point at the map and its check
 - CONTRIBUTING.md holds the full rules. The intro, the PR templates and the reviewer prompts each carry the part their reader needs, so a rule change starts in CONTRIBUTING.md and then reaches each copy (2026-10-24, #1178).
 - The notifier's reviewers can't read this map, so a notifier PR names its entry, or the hermes-conduit PR that adds or updates it (2026-10-24, #1178).
 - An entry a PR adds or edits names that PR on its Checked line, and CI fails one that doesn't; a commit is only for an entry seeded from main. A carry PR names both, like "#1188, carried in #1200". The PR template asks for a Siblings line for every sibling the entry lists, Settings and model-facing text included (2026-10-24, #1209, Eric).
-- On a PR into `pulse`, an entry that matches main's copy where the PR meets main came in by merging main and keeps main's Checked line, so bringing main into `pulse` doesn't name the merge on every entry main changed (2026-10-25, #PRNUM; the first such merge after #1209 failed the check on 48 entries).
+- On a PR into `pulse`, an entry that matches main's copy where the PR meets main came in by merging main and keeps main's Checked line, so bringing main into `pulse` doesn't name the merge on every entry main changed (2026-10-25, #1248; the first such merge after #1209 failed the check on 48 entries).
 
 **Open gaps**
 - A connection nobody has noticed yet isn't caught by any check; it goes in the first time a fix turns it up.
 - A notifier PR that moves a file listed here fails the next hermes-conduit PR's map check, not its own.
 - A PR that changes a mapped feature's code without touching its entry isn't caught by CI; a reviewer flags it (minor).
 
-**Checked:** 2026-10-25, #PRNUM.
+**Checked:** 2026-10-25, #1248.
