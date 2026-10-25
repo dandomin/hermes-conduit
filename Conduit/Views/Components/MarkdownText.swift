@@ -2139,7 +2139,10 @@ private struct RemoteMarkdownImage: View {
     /// The cache key `gatewayImage` was loaded for, so a row kept across a
     /// dashboard or profile switch never shows the picture it held before.
     @State private var gatewayImageKey: String?
-    @State private var gatewayLoadFailed = false
+    /// The picture whose load failed, so a row handed another picture
+    /// never shows it as unavailable.
+    @State private var gatewayFailedURL: String?
+    private var gatewayLoadFailed: Bool { gatewayFailedURL == url }
     /// A web picture, fetched and decoded within bounds; nil while loading.
     @State private var remoteOutcome: BoundedRemoteImage.Outcome?
     /// The address `remoteOutcome` is for: a row handed another picture
@@ -2255,7 +2258,7 @@ private struct RemoteMarkdownImage: View {
             }
             gatewayImage = nil
             gatewayImageKey = nil
-            gatewayLoadFailed = false
+            gatewayFailedURL = nil
             let maxPixelSize = Self.remoteMaxPixelSize
             // Kept on the phone from an earlier load: no request, and the
             // read and decode stay off the main thread. After a sign-out
@@ -2277,7 +2280,7 @@ private struct RemoteMarkdownImage: View {
                   let dataURL = await gatewayMediaDataURL(gatewayPath),
                   !Task.isCancelled else {
                 guard !Task.isCancelled else { return }
-                gatewayLoadFailed = true
+                gatewayFailedURL = url
                 return
             }
             // The data URL (up to 16 MB of base64) is decoded, kept and
@@ -2297,7 +2300,7 @@ private struct RemoteMarkdownImage: View {
             }.value
             guard !Task.isCancelled else { return }
             guard case .image(let image) = decoded else {
-                gatewayLoadFailed = true
+                gatewayFailedURL = url
                 return
             }
             if let cacheKey, generation == TranscriptImageCache.generation {

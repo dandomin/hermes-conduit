@@ -1892,7 +1892,12 @@ private struct UserImageAttachmentPreview: View {
                     return
                 }
                 guard !Task.isCancelled else { return }
-                remember(image, as: cacheKey)
+                if generation == TranscriptImageCache.generation {
+                    remember(image, as: cacheKey)
+                } else {
+                    gatewayImage = image
+                    gatewayImageKey = cacheKey
+                }
             }
         }
     }
