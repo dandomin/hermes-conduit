@@ -1803,12 +1803,12 @@ private struct UserImageAttachmentPreview: View {
             if let image = cachedLocalImage ?? currentLocalPreview ?? currentGatewayImage {
                 imagePreview(image)
             } else if loadsFromHermes && localFileURL == nil && !gatewayLoadFailed {
-                loadingPlaceholder
+                placeholder
                     .modifier(ImageDescriptionMenu(description: attachment.imageDescription))
                     .modifier(OptionalAccessibilityHint(hint: attachment.imageDescription))
             } else if localFileURL != nil && !localPreviewFailed {
                 // Local file decoding off-main on a cache miss.
-                loadingPlaceholder
+                placeholder
                     .modifier(ImageDescriptionMenu(description: attachment.imageDescription))
                     .modifier(OptionalAccessibilityHint(hint: attachment.imageDescription))
             } else {
@@ -1840,6 +1840,7 @@ private struct UserImageAttachmentPreview: View {
                     return
                 }
                 Self.localImageCache.setObject(image, forKey: url.path as NSString, cost: Self.bitmapCost(of: image))
+                TranscriptPictureMemory.rememberSize(image.size, for: url.path)
                 localPreview = image
                 localPreviewPath = url.path
                 // A picture from Hermes. The local-file branch returns above,
@@ -1888,6 +1889,7 @@ private struct UserImageAttachmentPreview: View {
 
     private func remember(_ image: UIImage, as key: String) {
         Self.localImageCache.setObject(image, forKey: key as NSString, cost: Self.bitmapCost(of: image))
+        TranscriptPictureMemory.rememberSize(image.size, for: key)
         gatewayImage = image
         gatewayImageKey = key
     }
@@ -1922,6 +1924,30 @@ private struct UserImageAttachmentPreview: View {
         }.value
     }
 
+    /// The picture's size when it's known before it loads: remembered from
+    /// this launch, else read from the header of the photo or the copy kept
+    /// on the phone. A row scrolled back into view then takes its final
+    /// height at once instead of growing from the loading line (#1238).
+    private var reservedSize: CGSize? {
+        guard let key = memoryCacheKey else { return nil }
+        return TranscriptPictureMemory.size(for: key) {
+            localFileURL ?? TranscriptImageCache.cachedFile(for: key)
+        }
+    }
+
+    @ViewBuilder private var placeholder: some View {
+        if let size = reservedSize {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.13))
+                .frame(width: 224, height: previewHeight(for: size))
+                .overlay { ProgressView().tint(.white) }
+                .accessibilityElement()
+                .accessibilityLabel(Text("Loading image…"))
+        } else {
+            loadingPlaceholder
+        }
+    }
+
     private var loadingPlaceholder: some View {
         HStack(spacing: 8) {
             ProgressView()
@@ -1949,7 +1975,7 @@ private struct UserImageAttachmentPreview: View {
         Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
-                .frame(width: 224, height: previewHeight(for: image))
+                .frame(width: 224, height: previewHeight(for: image.size))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -2006,9 +2032,9 @@ private struct UserImageAttachmentPreview: View {
         }
     }
 
-    private func previewHeight(for image: UIImage) -> CGFloat {
-        guard image.size.width > 0 else { return 168 }
-        return min(260, max(120, 224 * image.size.height / image.size.width))
+    private func previewHeight(for size: CGSize) -> CGFloat {
+        guard size.width > 0 else { return 168 }
+        return min(260, max(120, 224 * size.height / size.width))
     }
 
 }
