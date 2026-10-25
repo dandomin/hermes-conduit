@@ -1647,6 +1647,31 @@ clips (kaishi00/hermes-conduit-website)
 
 **Checked:** 2026-10-25, at #1228.
 
+## Pictures in messages
+
+How a picture in a transcript loads, and the room its row takes before it
+does.
+
+**Siblings:** chats, project chats and Bot Chat · the saved-chat copy · reply
+pictures in tool results, large documents and HTML previews · call job
+result sheets · group rooms
+
+**Code**
+- Attachments: `Conduit/Views/ChatView.swift` (UserImageAttachmentPreview)
+- Reply pictures (`MEDIA:` and web): `Conduit/Views/Components/MarkdownText.swift` (RemoteMarkdownImage), `Conduit/Views/Components/BoundedRemoteImage.swift`, `Conduit/Views/Components/GatewayMediaDataURLResolver.swift` (imageCacheKey), set for job sheets in `Conduit/Views/LiveVoiceCallJobs.swift`
+- Kept and remembered: `Conduit/Services/TranscriptImageCache.swift` (files on the phone), `Conduit/Services/TranscriptPictureMemory.swift` (decoded reply pictures, every picture's size), both forgotten in `Conduit/Services/AppState.swift` (wipeOfflineChatCache, deleteSavedChats)
+- Tests: `ConduitTests/TranscriptInlineImageTests.swift`
+
+**Rulings**
+- A row never changes height when its picture arrives, if the picture's size can be known first: remembered this launch, or read from the kept file's header. Its placeholder takes that size (2026-10-25, #1239, #1238).
+- Reading, decoding and keeping a picture stay off the main thread; a picture kept on the phone is never fetched again (2026-10-25, #1239).
+
+**Open gaps**
+- A picture never loaded on this phone still mounts as a loading line and grows once.
+- Group rooms show no `MEDIA:` pictures: their Markdown has no gateway resolver.
+
+**Checked:** 2026-10-25, at #1239.
+
 ## Feature map rules
 
 How a change brings its connected features along, and how this map stays
