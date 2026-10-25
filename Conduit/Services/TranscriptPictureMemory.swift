@@ -50,7 +50,7 @@ enum TranscriptPictureMemory {
     /// brings nothing back.
     private static var generation = 0
 
-    static var defaultSizesFile: URL {
+    nonisolated static var defaultSizesFile: URL {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return base.appendingPathComponent("TranscriptImageSizes.plist")
