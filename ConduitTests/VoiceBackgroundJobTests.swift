@@ -3124,3 +3124,159 @@ extension VoiceConversationControllerTests {
         XCTAssertEqual(jobs.pending, [.speak("Job finished.")])
     }
 }
+
+// MARK: - One chat per unattached call (#1250)
+
+@MainActor
+extension VoiceConversationControllerTests {
+    private func makeOneChatCall() -> (VoiceBackgroundJobSupervisor, FakeVoiceJobBackend) {
+        let fake = FakeVoiceJobBackend()
+        let supervisor = VoiceBackgroundJobSupervisor(
+            backend: fake.backend,
+            pollInterval: .seconds(3_600),
+            threadWaitInterval: .milliseconds(5)
+        )
+        supervisor.liveCallTranscript = { [] }
+        supervisor.beginLiveCall(keepsOneChat: true)
+        return (supervisor, fake)
+    }
+
+    func testAnUnattachedCallSendsItsRequestsToOneChatItMakes() async {
+        let (supervisor, fake) = makeOneChatCall()
+        var badged: [String] = []
+        supervisor.onJobSessionCreated = { badged += $0 }
+
+        let refusal = await supervisor.makeCallChat(for: "check the build")
+        XCTAssertNil(refusal)
+        XCTAssertEqual(supervisor.liveThread?.runtimeSessionID, "rt-1")
+        XCTAssertEqual(supervisor.liveThread?.storedSessionID, "st-1")
+        XCTAssertTrue(supervisor.liveThreadIsCallOwned)
+        XCTAssertEqual(fake.titles.map(\.0), ["rt-1"], "the call's chat is titled like a job")
+        XCTAssertEqual(badged, ["rt-1", "st-1"])
+
+        XCTAssertNotNil(supervisor.startThreadTurn(request: "check the build").jobID)
+        guard await waitFor({ supervisor.jobs.first?.status == .running }) else { return }
+        supervisor.observe(.messageComplete(sessionId: "rt-1", messageId: "m1", content: "Green.", reasoning: nil))
+        XCTAssertEqual(supervisor.jobs.first?.status, .finished)
+
+        XCTAssertNil(await supervisor.makeCallChat(for: "and the tests?"), "the call already has its chat")
+        XCTAssertNotNil(supervisor.startThreadTurn(request: "and the tests?").jobID)
+        guard await waitFor({ fake.threadSubmissions.count == 2 }) else { return }
+
+        XCTAssertEqual(fake.created, 1, "one Hermes session for the whole call")
+        XCTAssertEqual(fake.threadSubmissions.map(\.0), ["rt-1", "rt-1"])
+        XCTAssertTrue(fake.submissions.isEmpty, "no background job was started")
+    }
+
+    func testRequestsSaidWhileTheCallsChatIsMadeShareIt() async {
+        let (supervisor, fake) = makeOneChatCall()
+        fake.parksCreate = true
+        async let first = supervisor.makeCallChat(for: "check the build")
+        await fake.createParked.waitUntil(1)
+        async let second = supervisor.makeCallChat(for: "and the tests?")
+        fake.releaseCreate()
+        let (a, b) = await (first, second)
+        XCTAssertNil(a)
+        XCTAssertNil(b)
+        XCTAssertEqual(fake.created, 1)
+        XCTAssertEqual(supervisor.liveThread?.runtimeSessionID, "rt-1")
+    }
+
+    func testAHangUpWhileTheCallsChatIsMadeLeavesNothingAttached() async {
+        let (supervisor, fake) = makeOneChatCall()
+        fake.parksCreate = true
+        async let made = supervisor.makeCallChat(for: "check the build")
+        await fake.createParked.waitUntil(1)
+        supervisor.detachLiveThread()
+        fake.releaseCreate()
+        let refusal = await made
+        XCTAssertNotNil(refusal)
+        XCTAssertNil(supervisor.liveThread, "the next call starts unattached")
+        XCTAssertFalse(supervisor.liveThreadIsCallOwned)
+    }
+
+    func testTheNextCallMakesItsOwnChat() async {
+        let (supervisor, fake) = makeOneChatCall()
+        XCTAssertNil(await supervisor.makeCallChat(for: "check the build"))
+        supervisor.detachLiveThread()
+        XCTAssertFalse(supervisor.liveThreadIsCallOwned)
+
+        supervisor.beginLiveCall(keepsOneChat: true)
+        XCTAssertNil(await supervisor.makeCallChat(for: "check the news"))
+        XCTAssertEqual(fake.created, 2)
+        XCTAssertEqual(supervisor.liveThread?.runtimeSessionID, "rt-2")
+    }
+
+    func testOnlyACallThatKeepsOneChatMakesOne() async {
+        let fake = FakeVoiceJobBackend()
+        let supervisor = VoiceBackgroundJobSupervisor(backend: fake.backend, pollInterval: .seconds(3_600))
+        supervisor.liveCallTranscript = { [] }
+        supervisor.beginLiveCall()
+        XCTAssertFalse(supervisor.keepsOneChatPerCall)
+        XCTAssertNotNil(await supervisor.makeCallChat(for: "check the build"))
+        XCTAssertEqual(fake.created, 0)
+        XCTAssertNil(supervisor.liveThread)
+    }
+
+    func testAnAttachedCallsChatIsNotTheCallsOwn() async {
+        let (supervisor, fake) = makeOneChatCall()
+        supervisor.attachLiveThread(VoiceThreadTarget(runtimeSessionID: "rt-chat", storedSessionID: "st-chat", title: "Build"))
+        XCTAssertNil(await supervisor.makeCallChat(for: "check the build"))
+        XCTAssertEqual(fake.created, 0, "the chat the call started from takes its requests")
+        XCTAssertFalse(supervisor.liveThreadIsCallOwned)
+        XCTAssertEqual(supervisor.liveThread?.runtimeSessionID, "rt-chat")
+    }
+
+    // MARK: Bridges
+
+    func testGeminiLiveStartJobOnAnUnattachedCallGoesToTheCallsChat() async {
+        let (supervisor, fake) = makeOneChatCall()
+        let bridge = GeminiLiveToolBridge(supervisor: supervisor, holdsJobCalls: false)
+        _ = await bridge.handle(.init(id: "c1", name: "start_job", arguments: ["instructions": "check the build"]))
+        guard await waitFor({ fake.threadSubmissions.count == 1 }) else { return }
+        supervisor.observe(.messageComplete(sessionId: "rt-1", messageId: "m1", content: "Green.", reasoning: nil))
+        _ = await bridge.handle(.init(id: "c2", name: "start_job", arguments: ["instructions": "and the tests?"]))
+        guard await waitFor({ fake.threadSubmissions.count == 2 }) else { return }
+
+        XCTAssertEqual(fake.created, 1)
+        XCTAssertEqual(fake.threadSubmissions.map(\.0), ["rt-1", "rt-1"])
+        XCTAssertTrue(fake.submissions.isEmpty)
+    }
+
+    func testGeminiLiveExplicitBackgroundJobsAndOtherProfilesStayApart() async {
+        let (supervisor, fake) = makeOneChatCall()
+        fake.profileTargets = ["fam": .other("fam")]
+        let bridge = GeminiLiveToolBridge(supervisor: supervisor, holdsJobCalls: false)
+        _ = await bridge.handle(.init(id: "c1", name: "start_job", arguments: ["instructions": "background job: check the build"]))
+        _ = await bridge.handle(.init(id: "c2", name: "start_job", arguments: ["instructions": "check the news", "profile": "fam"]))
+
+        XCTAssertEqual(fake.created, 2, "each is its own job")
+        XCTAssertEqual(fake.submissions.count, 2)
+        XCTAssertTrue(fake.threadSubmissions.isEmpty)
+        XCTAssertNil(supervisor.liveThread, "no call chat was made for them")
+    }
+
+    func testGPTLiveDelegationsOnAnUnattachedCallGoToTheCallsChat() async {
+        let (supervisor, fake) = makeOneChatCall()
+        let bridge = GPTLiveDelegationBridge(supervisor: supervisor)
+        _ = await bridge.handleDelegation(id: "del_1", request: "check the build")
+        guard await waitFor({ fake.threadSubmissions.count == 1 }) else { return }
+        supervisor.observe(.messageComplete(sessionId: "rt-1", messageId: "m1", content: "Green.", reasoning: nil))
+        _ = await bridge.handleDelegation(id: "del_2", request: "New job: check the news")
+        guard await waitFor({ fake.threadSubmissions.count == 2 }) else { return }
+
+        XCTAssertEqual(fake.created, 1)
+        XCTAssertEqual(fake.threadSubmissions.map(\.0), ["rt-1", "rt-1"])
+        XCTAssertTrue(fake.submissions.isEmpty)
+    }
+
+    func testGPTLiveExplicitBackgroundJobStaysApart() async {
+        let (supervisor, fake) = makeOneChatCall()
+        let bridge = GPTLiveDelegationBridge(supervisor: supervisor)
+        _ = await bridge.handleDelegation(id: "del_1", request: "Background job: check the build")
+        XCTAssertEqual(fake.created, 1)
+        XCTAssertEqual(fake.submissions.count, 1)
+        XCTAssertTrue(fake.threadSubmissions.isEmpty)
+        XCTAssertNil(supervisor.liveThread)
+    }
+}
