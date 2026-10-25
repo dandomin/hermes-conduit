@@ -1828,8 +1828,8 @@ private struct UserImageAttachmentPreview: View {
                     localPreviewFailedPath = url.path
                     return
                 }
-                TranscriptPictureMemory.previews.setObject(image, forKey: url.path as NSString, cost: TranscriptPictureMemory.bitmapCost(of: image))
                 if generation == TranscriptImageCache.generation {
+                    TranscriptPictureMemory.previews.setObject(image, forKey: url.path as NSString, cost: TranscriptPictureMemory.bitmapCost(of: image))
                     TranscriptPictureMemory.rememberSize(image.size, for: url.path)
                 }
                 localPreview = image
