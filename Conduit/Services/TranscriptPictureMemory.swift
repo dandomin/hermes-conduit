@@ -77,7 +77,10 @@ enum TranscriptPictureMemory {
         loadedKeptSizes = true
         let started = generation
         let load = Task {
-            let kept = await Task.detached(priority: .utility) { readSizes(from: file) }.value
+            // On `io`, so it runs after any removal `forgetAll` already asked for.
+            let kept = await withCheckedContinuation { continuation in
+                io.async { continuation.resume(returning: readSizes(from: file)) }
+            }
             guard generation == started else {
                 loadedKeptSizes = false
                 return
