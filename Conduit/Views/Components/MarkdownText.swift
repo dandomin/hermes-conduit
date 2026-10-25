@@ -2142,6 +2142,9 @@ private struct RemoteMarkdownImage: View {
     @State private var gatewayLoadFailed = false
     /// A web picture, fetched and decoded within bounds; nil while loading.
     @State private var remoteOutcome: BoundedRemoteImage.Outcome?
+    /// The address `remoteOutcome` is for: a row handed another picture
+    /// never shows the one it held before.
+    @State private var remoteOutcomeURL: String?
     @State private var openingRemote = false
     @State private var openTask: Task<Void, Never>?
 
@@ -2165,7 +2168,7 @@ private struct RemoteMarkdownImage: View {
     }
 
     private var shownRemoteOutcome: BoundedRemoteImage.Outcome? {
-        if let remoteOutcome { return remoteOutcome }
+        if let remoteOutcome, remoteOutcomeURL == url { return remoteOutcome }
         guard !isGatewayMedia, let remoteURL = URL(string: url),
               let cached = BoundedRemoteImage.cachedImage(remoteURL, maxPixelSize: Self.remoteMaxPixelSize) else { return nil }
         return .image(cached)
@@ -2225,6 +2228,7 @@ private struct RemoteMarkdownImage: View {
             guard isGatewayMedia else {
                 // A URL that isn't RFC-valid goes to the web view, which
                 // escapes it.
+                remoteOutcomeURL = url
                 guard let remoteURL = URL(string: url) else {
                     remoteOutcome = .unavailable
                     return

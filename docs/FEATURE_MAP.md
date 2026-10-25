@@ -1659,13 +1659,13 @@ Settings caption, briefing or doc says how pictures load)
 
 **Code**
 - Attachments: `Conduit/Views/ChatView.swift` (UserImageAttachmentPreview)
-- Reply pictures (`MEDIA:` and web): `Conduit/Views/Components/MarkdownText.swift` (RemoteMarkdownImage), `Conduit/Views/Components/BoundedRemoteImage.swift`, `Conduit/Views/Components/GatewayMediaDataURLResolver.swift` (imageCacheKey), set for job sheets in `Conduit/Views/LiveVoiceCallJobs.swift`
+- Reply pictures (`MEDIA:` and web): `Conduit/Views/Components/MarkdownText.swift` (RemoteMarkdownImage), `Conduit/Views/Components/BoundedRemoteImage.swift`, `Conduit/Views/Components/GatewayMediaDataURLResolver.swift` (imageCacheKey, imageCacheKey(forMediaPath:)), set for job sheets in `Conduit/Views/LiveVoiceCallJobs.swift`
 - Kept and remembered: `Conduit/Services/TranscriptImageCache.swift` (files on the phone), `Conduit/Services/TranscriptPictureMemory.swift` (decoded reply pictures, every picture's size, loaded from ChatView), both forgotten in `Conduit/Services/AppState.swift` (wipeOfflineChatCache, deleteSavedChats)
 - Tests: `ConduitTests/TranscriptInlineImageTests.swift`
 
 **Rulings**
 - A row never changes height when its picture arrives, if the picture has loaded on this phone before: its size is remembered (kept next to the pictures, read once off the main thread) and its placeholder takes it (2026-10-25, #1239, #1238).
-- Reading, decoding and keeping a picture, and its size, stay off the main thread; a body only looks things up in memory. A picture kept on the phone is never fetched again (2026-10-25, #1239).
+- Reading, decoding and keeping a picture, and its size, stay off the main thread: a body looks pictures and sizes up in memory only (a local photo's existence check is the one file call left there). A picture kept on the phone is never fetched again (2026-10-25, #1239).
 
 **Open gaps**
 - A picture never loaded on this phone, or kept by a build before #1239 and not shown since, still mounts as a loading line and grows once.

@@ -47,9 +47,9 @@ enum TranscriptPictureMemory {
         images.object(forKey: key as NSString)
     }
 
-    static func remember(_ image: UIImage, for key: String) {
+    static func remember(_ image: UIImage, for key: String, savingTo file: URL? = defaultSizesFile) {
         images.setObject(image, forKey: key as NSString, cost: bitmapCost(of: image))
-        rememberSize(image.size, for: key)
+        rememberSize(image.size, for: key, savingTo: file)
     }
 
     static func size(for key: String) -> CGSize? {

@@ -321,25 +321,24 @@ extension MessageNormalizerTests {
 
     @MainActor
     func testAPicturesSizeIsRememberedSoItsRowNeverGrowsWhenItLoads() throws {
-        TranscriptPictureMemory.forgetAll(sizesFile: FileManager.default.temporaryDirectory
-            .appendingPathComponent("TranscriptImageSizes-\(UUID().uuidString).plist"))
-        defer { TranscriptPictureMemory.forgetAll(sizesFile: FileManager.default.temporaryDirectory
-            .appendingPathComponent("TranscriptImageSizes-\(UUID().uuidString).plist")) }
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptImageSizes-\(UUID().uuidString).plist")
+        TranscriptPictureMemory.forgetAll(sizesFile: file)
+        defer { TranscriptPictureMemory.forgetAll(sizesFile: file) }
 
         XCTAssertNil(TranscriptPictureMemory.size(for: "a"))
         TranscriptPictureMemory.rememberSize(CGSize(width: 30, height: 60), for: "a", savingTo: nil)
         XCTAssertEqual(TranscriptPictureMemory.size(for: "a"), CGSize(width: 30, height: 60))
 
         let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 4)).image { _ in }
-        TranscriptPictureMemory.remember(image, for: "b")
+        TranscriptPictureMemory.remember(image, for: "b", savingTo: nil)
         XCTAssertEqual(TranscriptPictureMemory.size(for: "b"), CGSize(width: 8, height: 4))
         XCTAssertNotNil(TranscriptPictureMemory.image(for: "b"))
 
         // A size of nothing is never kept; a sign-out forgets them all.
         TranscriptPictureMemory.rememberSize(.zero, for: "c", savingTo: nil)
         XCTAssertNil(TranscriptPictureMemory.size(for: "c"))
-        TranscriptPictureMemory.forgetAll(sizesFile: FileManager.default.temporaryDirectory
-            .appendingPathComponent("TranscriptImageSizes-\(UUID().uuidString).plist"))
+        TranscriptPictureMemory.forgetAll(sizesFile: file)
         XCTAssertNil(TranscriptPictureMemory.image(for: "b"))
         XCTAssertNil(TranscriptPictureMemory.size(for: "a"))
     }
