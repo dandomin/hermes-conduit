@@ -32,6 +32,9 @@ enum TranscriptPictureMemory {
     /// Shown sizes by key: a kept picture's cache key, or a photo's path.
     private static var sizes: [String: CGSize] = [:]
     private static var loadedKeptSizes = false
+    /// The read under way, so overlapping callers (a restarted `.task`, a
+    /// save) wait for its merge instead of passing it by.
+    private static var keptSizesLoad: Task<Void, Never>?
     private static var pendingSave: Task<Void, Never>?
     /// Moves on with every `forgetAll`, so a read or save from before it
     /// brings nothing back.
@@ -66,18 +69,27 @@ enum TranscriptPictureMemory {
     /// Reads the sizes kept from earlier launches, once, off the main
     /// thread. Sizes remembered meanwhile win.
     static func loadKeptSizes(from file: URL = defaultSizesFile) async {
+        if let keptSizesLoad {
+            await keptSizesLoad.value
+            return
+        }
         guard !loadedKeptSizes else { return }
         loadedKeptSizes = true
         let started = generation
-        let kept = await Task.detached(priority: .utility) { readSizes(from: file) }.value
-        guard generation == started else {
-            loadedKeptSizes = false
-            return
+        let load = Task {
+            let kept = await Task.detached(priority: .utility) { readSizes(from: file) }.value
+            guard generation == started else {
+                loadedKeptSizes = false
+                return
+            }
+            let room = max(0, sizeLimit - sizes.count)
+            for (key, size) in kept.prefix(room) where sizes[key] == nil {
+                sizes[key] = size
+            }
         }
-        let room = max(0, sizeLimit - sizes.count)
-        for (key, size) in kept.prefix(room) where sizes[key] == nil {
-            sizes[key] = size
-        }
+        keptSizesLoad = load
+        await load.value
+        keptSizesLoad = nil
     }
 
     /// Everything goes with the kept files (sign-out, Delete Saved Chats).
@@ -97,6 +109,10 @@ enum TranscriptPictureMemory {
         let started = generation
         pendingSave = Task {
             try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, generation == started else { return }
+            // The kept sizes first, so the save never writes over them
+            // with only this launch's.
+            await loadKeptSizes(from: file)
             guard !Task.isCancelled, generation == started else { return }
             let snapshot = sizes
             io.async { writeSizes(snapshot, to: file) }

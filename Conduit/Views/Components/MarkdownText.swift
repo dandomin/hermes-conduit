@@ -2365,7 +2365,15 @@ private struct RemoteMarkdownImage: View {
     /// The row keeps only the decoded image, not the original bytes (up to
     /// 16 MB each across a whole transcript), so opening re-fetches them.
     private func openGatewayImage() {
-        guard !openingRemote, let gatewayMediaDataURL else { return }
+        guard !openingRemote else { return }
+        // The original kept on the phone, which stays after Hermes sweeps
+        // its copy.
+        if let key = gatewayCacheKey,
+           let kept = TranscriptImageCache.cachedFile(for: key, touch: true),
+           MediaPreviewPresenter.shared.present(fileURL: kept, title: alt.isEmpty ? MarkdownParser.mediaName(gatewayPath) : alt) {
+            return
+        }
+        guard let gatewayMediaDataURL else { return }
         let path = gatewayPath
         openingRemote = true
         openTask = Task {
