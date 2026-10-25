@@ -2241,9 +2241,10 @@ private struct RemoteMarkdownImage: View {
                     return
                 }
                 remoteOutcome = nil
+                let started = TranscriptImageCache.generation
                 let outcome = await BoundedRemoteImage.load(remoteURL, maxPixelSize: Self.remoteMaxPixelSize)
                 guard !Task.isCancelled else { return }
-                if case .image(let image) = outcome {
+                if case .image(let image) = outcome, started == TranscriptImageCache.generation {
                     TranscriptPictureMemory.rememberSize(image.size, for: remoteSizeKey)
                 }
                 withAnimation(.easeInOut(duration: 0.2)) { remoteOutcome = outcome }
