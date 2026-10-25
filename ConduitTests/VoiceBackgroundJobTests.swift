@@ -3247,7 +3247,7 @@ extension VoiceConversationControllerTests {
         let (supervisor, fake) = makeOneChatCall()
         fake.profileTargets = ["fam": .other("fam")]
         let bridge = GeminiLiveToolBridge(supervisor: supervisor, holdsJobCalls: false)
-        _ = await bridge.handle(.init(id: "c1", name: "start_job", arguments: ["instructions": "background job: check the build"]))
+        _ = await bridge.handle(.init(id: "c1", name: "start_job", arguments: ["instructions": "check the build in the background"]))
         _ = await bridge.handle(.init(id: "c2", name: "start_job", arguments: ["instructions": "check the news", "profile": "fam"]))
 
         XCTAssertEqual(fake.created, 2, "each is its own job")
@@ -3273,7 +3273,7 @@ extension VoiceConversationControllerTests {
     func testGPTLiveExplicitBackgroundJobStaysApart() async {
         let (supervisor, fake) = makeOneChatCall()
         let bridge = GPTLiveDelegationBridge(supervisor: supervisor)
-        _ = await bridge.handleDelegation(id: "del_1", request: "Background job: check the build")
+        _ = await bridge.handleDelegation(id: "del_1", request: "check the build in the background")
         XCTAssertEqual(fake.created, 1)
         XCTAssertEqual(fake.submissions.count, 1)
         XCTAssertTrue(fake.threadSubmissions.isEmpty)
