@@ -1,4 +1,3 @@
-import ImageIO
 import UIKit
 import XCTest
 @testable import Conduit
@@ -320,70 +319,43 @@ extension MessageNormalizerTests {
 
     // MARK: - Picture sizes known before a row loads (#1238)
 
-    /// A JPEG of `width` x `height` pixels written with an EXIF orientation.
-    private func writeJPEG(width: Int, height: Int, orientation: Int, to file: URL) throws {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: {
-            let format = UIGraphicsImageRendererFormat()
-            format.scale = 1
-            return format
-        }())
-        let cgImage = try XCTUnwrap(renderer.image { context in
-            UIColor.red.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        }.cgImage)
-        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(file as CFURL, "public.jpeg" as CFString, 1, nil))
-        CGImageDestinationAddImage(destination, cgImage, [kCGImagePropertyOrientation: orientation] as CFDictionary)
-        XCTAssertTrue(CGImageDestinationFinalize(destination))
-    }
-
-    func testAPicturesSizeIsReadUprightFromItsHeader() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("TranscriptPictureSizeTests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let upright = directory.appendingPathComponent("upright.jpg")
-        let turned = directory.appendingPathComponent("turned.jpg")
-        try writeJPEG(width: 40, height: 10, orientation: 1, to: upright)
-        try writeJPEG(width: 40, height: 10, orientation: 6, to: turned)
-
-        XCTAssertEqual(TranscriptPictureMemory.pixelSize(of: upright), CGSize(width: 40, height: 10))
-        // A quarter turn shows it 10 wide, as the downsampled thumbnail is.
-        XCTAssertEqual(TranscriptPictureMemory.pixelSize(of: turned), CGSize(width: 10, height: 40))
-        XCTAssertNil(TranscriptPictureMemory.pixelSize(of: directory.appendingPathComponent("missing.jpg")))
-    }
-
     @MainActor
     func testAPicturesSizeIsRememberedSoItsRowNeverGrowsWhenItLoads() throws {
-        TranscriptPictureMemory.forgetAll()
-        defer { TranscriptPictureMemory.forgetAll() }
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("TranscriptPictureSizeTests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let kept = directory.appendingPathComponent("kept.jpg")
-        try writeJPEG(width: 30, height: 60, orientation: 1, to: kept)
+        TranscriptPictureMemory.forgetAll(sizesFile: FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptImageSizes-\(UUID().uuidString).plist"))
+        defer { TranscriptPictureMemory.forgetAll(sizesFile: FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptImageSizes-\(UUID().uuidString).plist")) }
 
-        // Read from the kept file once, then remembered.
-        var probes = 0
-        XCTAssertEqual(TranscriptPictureMemory.size(for: "a") { probes += 1; return kept }, CGSize(width: 30, height: 60))
-        XCTAssertEqual(TranscriptPictureMemory.size(for: "a") { probes += 1; return nil }, CGSize(width: 30, height: 60))
-        XCTAssertEqual(probes, 1)
+        XCTAssertNil(TranscriptPictureMemory.size(for: "a"))
+        TranscriptPictureMemory.rememberSize(CGSize(width: 30, height: 60), for: "a", savingTo: nil)
+        XCTAssertEqual(TranscriptPictureMemory.size(for: "a"), CGSize(width: 30, height: 60))
 
-        // A picture never kept is looked for once, until it loads.
-        XCTAssertNil(TranscriptPictureMemory.size(for: "b") { probes += 1; return nil })
-        XCTAssertNil(TranscriptPictureMemory.size(for: "b") { probes += 1; return kept })
-        XCTAssertEqual(probes, 2)
         let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 4)).image { _ in }
         TranscriptPictureMemory.remember(image, for: "b")
-        XCTAssertEqual(TranscriptPictureMemory.size(for: "b") { nil }, CGSize(width: 8, height: 4))
+        XCTAssertEqual(TranscriptPictureMemory.size(for: "b"), CGSize(width: 8, height: 4))
         XCTAssertNotNil(TranscriptPictureMemory.image(for: "b"))
 
         // A size of nothing is never kept; a sign-out forgets them all.
-        TranscriptPictureMemory.rememberSize(.zero, for: "c")
-        XCTAssertNil(TranscriptPictureMemory.size(for: "c") { nil })
-        TranscriptPictureMemory.forgetAll()
+        TranscriptPictureMemory.rememberSize(.zero, for: "c", savingTo: nil)
+        XCTAssertNil(TranscriptPictureMemory.size(for: "c"))
+        TranscriptPictureMemory.forgetAll(sizesFile: FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptImageSizes-\(UUID().uuidString).plist"))
         XCTAssertNil(TranscriptPictureMemory.image(for: "b"))
-        XCTAssertNil(TranscriptPictureMemory.size(for: "a") { nil })
+        XCTAssertNil(TranscriptPictureMemory.size(for: "a"))
+    }
+
+    func testPictureSizesAreKeptOnThePhoneAcrossLaunches() throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptImageSizes-\(UUID().uuidString).plist")
+        defer { try? FileManager.default.removeItem(at: file) }
+        XCTAssertEqual(TranscriptPictureMemory.readSizes(from: file), [:])
+
+        TranscriptPictureMemory.writeSizes(["path|d1|default|/a.png": CGSize(width: 1200, height: 800)], to: file)
+        XCTAssertEqual(TranscriptPictureMemory.readSizes(from: file), ["path|d1|default|/a.png": CGSize(width: 1200, height: 800)])
+
+        // A damaged file reads as no sizes.
+        try Data("not a plist".utf8).write(to: file)
+        XCTAssertEqual(TranscriptPictureMemory.readSizes(from: file), [:])
     }
 
     func testAPictureFromAReplyIsKeptFromItsDecodedBytes() throws {

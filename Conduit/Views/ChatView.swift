@@ -380,6 +380,9 @@ struct ChatView: View {
         .environment(\.selectableTextDrawsUntilTouched, true)
         // Gateway videos, audio and documents open from a download (#569).
         .environment(\.gatewayMediaFiles, appState.gatewayMediaResolver)
+        // Pictures' sizes from earlier launches, read once off the main
+        // thread, so rows above take their final height (#1238).
+        .task { await TranscriptPictureMemory.loadKeptSizes() }
         .background(Color.clear)
         .overlay(alignment: .top) {
             if appState.isOpeningNotificationSession {
@@ -1924,15 +1927,12 @@ private struct UserImageAttachmentPreview: View {
         }.value
     }
 
-    /// The picture's size when it's known before it loads: remembered from
-    /// this launch, else read from the header of the photo or the copy kept
-    /// on the phone. A row scrolled back into view then takes its final
-    /// height at once instead of growing from the loading line (#1238).
+    /// The picture's size when it's known before it loads (remembered when
+    /// it last loaded, on this launch or an earlier one). A row scrolled
+    /// back into view then takes its final height at once instead of
+    /// growing from the loading line (#1238).
     private var reservedSize: CGSize? {
-        guard let key = memoryCacheKey else { return nil }
-        return TranscriptPictureMemory.size(for: key) {
-            localFileURL ?? TranscriptImageCache.cachedFile(for: key)
-        }
+        memoryCacheKey.flatMap(TranscriptPictureMemory.size(for:))
     }
 
     @ViewBuilder private var placeholder: some View {

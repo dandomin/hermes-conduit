@@ -2136,6 +2136,9 @@ private struct RemoteMarkdownImage: View {
     /// (a surface that sets no resolver) it is fetched each time.
     @Environment(\.gatewayMediaFiles) private var gatewayMediaFiles
     @State private var gatewayImage: UIImage?
+    /// The cache key `gatewayImage` was loaded for, so a row kept across a
+    /// dashboard or profile switch never shows the picture it held before.
+    @State private var gatewayImageKey: String?
     @State private var gatewayLoadFailed = false
     /// A web picture, fetched and decoded within bounds; nil while loading.
     @State private var remoteOutcome: BoundedRemoteImage.Outcome?
@@ -2156,7 +2159,9 @@ private struct RemoteMarkdownImage: View {
     /// A picture still in memory shows on the row's first frame, so a row
     /// scrolled back into view doesn't grow from its loading line (#1238).
     private var shownGatewayImage: UIImage? {
-        gatewayImage ?? gatewayCacheKey.flatMap(TranscriptPictureMemory.image(for:))
+        let key = gatewayCacheKey
+        if let gatewayImage, gatewayImageKey == key { return gatewayImage }
+        return key.flatMap(TranscriptPictureMemory.image(for:))
     }
 
     private var shownRemoteOutcome: BoundedRemoteImage.Outcome? {
@@ -2168,13 +2173,8 @@ private struct RemoteMarkdownImage: View {
 
     /// The size the picture will take, when it's known before it loads.
     private var reservedSize: CGSize? {
-        if let gatewayCacheKey {
-            return TranscriptPictureMemory.size(for: gatewayCacheKey) {
-                TranscriptImageCache.cachedFile(for: gatewayCacheKey)
-            }
-        }
-        guard !isGatewayMedia else { return nil }
-        return TranscriptPictureMemory.size(for: remoteSizeKey) { nil }
+        if let gatewayCacheKey { return TranscriptPictureMemory.size(for: gatewayCacheKey) }
+        return isGatewayMedia ? nil : TranscriptPictureMemory.size(for: remoteSizeKey)
     }
     private var gatewayPath: String {
         String(url.dropFirst("MEDIA:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2221,7 +2221,7 @@ private struct RemoteMarkdownImage: View {
             openTask = nil
             openingRemote = false
         }
-        .task(id: url) {
+        .task(id: "\(url)|\(gatewayCacheKey ?? "")") {
             guard isGatewayMedia else {
                 // A URL that isn't RFC-valid goes to the web view, which
                 // escapes it.
@@ -2246,9 +2246,11 @@ private struct RemoteMarkdownImage: View {
             let cacheKey = gatewayCacheKey
             if let cacheKey, let kept = TranscriptPictureMemory.image(for: cacheKey) {
                 gatewayImage = kept
+                gatewayImageKey = cacheKey
                 return
             }
             gatewayImage = nil
+            gatewayImageKey = nil
             gatewayLoadFailed = false
             let maxPixelSize = Self.remoteMaxPixelSize
             // Kept on the phone from an earlier load: no request, and the
@@ -2257,6 +2259,7 @@ private struct RemoteMarkdownImage: View {
                 guard !Task.isCancelled else { return }
                 TranscriptPictureMemory.remember(kept, for: cacheKey)
                 gatewayImage = kept
+                gatewayImageKey = cacheKey
                 return
             }
             guard !Task.isCancelled else { return }
@@ -2293,6 +2296,7 @@ private struct RemoteMarkdownImage: View {
                 TranscriptPictureMemory.remember(image, for: cacheKey)
             }
             gatewayImage = image
+            gatewayImageKey = cacheKey
         }
     }
 

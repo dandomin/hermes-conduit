@@ -8,14 +8,15 @@
 //  mounted as a "Loading image…" line and grew a few frames later moved
 //  everything under it while the user scrolled up through a long chat.
 //
+//  Sizes are kept on the phone next to the pictures, read once off the main
+//  thread, so a body only ever looks one up in memory.
+//
 
-import ImageIO
 import UIKit
 
 @MainActor
 enum TranscriptPictureMemory {
-    /// Past this many sizes the memo starts again; a size is a few bytes,
-    /// and a miss costs one header read.
+    /// Past this many sizes the memo starts again; a size is a few bytes.
     static let sizeLimit = 4000
 
     /// Decoded pictures from Hermes' `MEDIA:` paths, by their
@@ -28,9 +29,19 @@ enum TranscriptPictureMemory {
         return cache
     }()
 
-    /// Shown sizes by key. A nil value records a probe that found no file,
-    /// so a picture never loaded isn't looked for on every redraw.
-    private static var sizes: [String: CGSize?] = [:]
+    /// Shown sizes by key: a kept picture's cache key, or a photo's path.
+    private static var sizes: [String: CGSize] = [:]
+    private static var loadedKeptSizes = false
+    private static var pendingSave: Task<Void, Never>?
+    /// Moves on with every `forgetAll`, so a read or save from before it
+    /// brings nothing back.
+    private static var generation = 0
+
+    static var defaultSizesFile: URL {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent("TranscriptImageSizes.plist")
+    }
 
     static func image(for key: String) -> UIImage? {
         images.object(forKey: key as NSString)
@@ -41,45 +52,73 @@ enum TranscriptPictureMemory {
         rememberSize(image.size, for: key)
     }
 
-    static func rememberSize(_ size: CGSize, for key: String) {
-        guard size.width > 0, size.height > 0 else { return }
-        store(size, for: key)
+    static func size(for key: String) -> CGSize? {
+        sizes[key]
     }
 
-    /// The picture's size: remembered from this launch, else read from the
-    /// header of the file `file` names (the picture kept on the phone, or
-    /// the photo itself), once per key.
-    static func size(for key: String, probing file: () -> URL?) -> CGSize? {
-        if let entry = sizes[key] { return entry }
-        let size = file().flatMap(pixelSize(of:))
-        store(size, for: key)
-        return size
+    static func rememberSize(_ size: CGSize, for key: String, savingTo file: URL? = defaultSizesFile) {
+        guard size.width > 0, size.height > 0, sizes[key] != size else { return }
+        if sizes.count >= sizeLimit, sizes[key] == nil { sizes.removeAll() }
+        sizes[key] = size
+        if let file { scheduleSave(to: file) }
+    }
+
+    /// Reads the sizes kept from earlier launches, once, off the main
+    /// thread. Sizes remembered meanwhile win.
+    static func loadKeptSizes(from file: URL = defaultSizesFile) async {
+        guard !loadedKeptSizes else { return }
+        loadedKeptSizes = true
+        let started = generation
+        let kept = await Task.detached(priority: .utility) { readSizes(from: file) }.value
+        guard generation == started else { return }
+        let room = max(0, sizeLimit - sizes.count)
+        for (key, size) in kept.prefix(room) where sizes[key] == nil {
+            sizes[key] = size
+        }
     }
 
     /// Everything goes with the kept files (sign-out, Delete Saved Chats).
-    static func forgetAll() {
+    static func forgetAll(sizesFile file: URL = defaultSizesFile) {
+        generation += 1
+        pendingSave?.cancel()
+        pendingSave = nil
         images.removeAllObjects()
         sizes.removeAll()
+        io.async { try? FileManager.default.removeItem(at: file) }
     }
 
-    /// Width and height as the picture is shown, upright: ImageIO's
-    /// thumbnails apply the EXIF orientation, so a quarter turn swaps them.
-    /// Reads the header only, nothing is decoded.
-    nonisolated static func pixelSize(of file: URL) -> CGSize? {
-        guard let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
-              CGImageSourceGetCount(source) > 0,
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
-              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
-              width > 0, height > 0 else { return nil }
-        let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
-        // 5 to 8 are the transposed orientations.
-        return (5...8).contains(orientation) ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
+    /// Writes the sizes a second after the last new one, off the main
+    /// thread.
+    private static func scheduleSave(to file: URL) {
+        pendingSave?.cancel()
+        let started = generation
+        pendingSave = Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, generation == started else { return }
+            let snapshot = sizes
+            io.async { writeSizes(snapshot, to: file) }
+        }
     }
 
-    private static func store(_ size: CGSize?, for key: String) {
-        if sizes.count >= sizeLimit, sizes.index(forKey: key) == nil { sizes.removeAll() }
-        sizes[key] = .some(size)
+    /// Saves and removals of the sizes file, in the order they were asked
+    /// for: a save already under way when the sizes are forgotten can't
+    /// land after the removal.
+    private nonisolated static let io = DispatchQueue(label: "TranscriptPictureMemory.io", qos: .utility)
+
+    nonisolated static func writeSizes(_ sizes: [String: CGSize], to file: URL) {
+        let plist = sizes.mapValues { [Double($0.width), Double($0.height)] }
+        guard let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0) else { return }
+        try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    nonisolated static func readSizes(from file: URL) -> [String: CGSize] {
+        guard let data = try? Data(contentsOf: file),
+              let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: [Double]]
+        else { return [:] }
+        return plist.compactMapValues { pair in
+            guard pair.count == 2, pair[0] > 0, pair[1] > 0 else { return nil }
+            return CGSize(width: pair[0], height: pair[1])
+        }
     }
 
     private static func bitmapCost(of image: UIImage) -> Int {
