@@ -179,6 +179,8 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('compare/main...$HEAD_SHA" --jq .merge_base_commit.sha', step)
         self.assertIn("git show FETCH_HEAD:docs/FEATURE_MAP.md", step)
         self.assertIn("--main-map", step)
+        # GitHub out of reach: warn and check as before, like the notifier lookup.
+        self.assertIn("::warning::Couldn't read docs/FEATURE_MAP.md on main", step)
 
     def test_smoke_job_builds_while_the_simulator_boots(self):
         """The smoke job builds its own products with the simulator booting in
