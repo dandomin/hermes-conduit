@@ -3159,7 +3159,8 @@ extension VoiceConversationControllerTests {
         supervisor.observe(.messageComplete(sessionId: "rt-1", messageId: "m1", content: "Green.", reasoning: nil))
         XCTAssertEqual(supervisor.jobs.first?.status, .finished)
 
-        XCTAssertNil(await supervisor.makeCallChat(for: "and the tests?"), "the call already has its chat")
+        let made1 = await supervisor.makeCallChat(for: "and the tests?")
+        XCTAssertNil(made1, "the call already has its chat")
         XCTAssertNotNil(supervisor.startThreadTurn(request: "and the tests?").jobID)
         guard await waitFor({ fake.threadSubmissions.count == 2 }) else { return }
 
@@ -3197,12 +3198,14 @@ extension VoiceConversationControllerTests {
 
     func testTheNextCallMakesItsOwnChat() async {
         let (supervisor, fake) = makeOneChatCall()
-        XCTAssertNil(await supervisor.makeCallChat(for: "check the build"))
+        let made2 = await supervisor.makeCallChat(for: "check the build")
+        XCTAssertNil(made2)
         supervisor.detachLiveThread()
         XCTAssertFalse(supervisor.liveThreadIsCallOwned)
 
         supervisor.beginLiveCall(keepsOneChat: true)
-        XCTAssertNil(await supervisor.makeCallChat(for: "check the news"))
+        let made3 = await supervisor.makeCallChat(for: "check the news")
+        XCTAssertNil(made3)
         XCTAssertEqual(fake.created, 2)
         XCTAssertEqual(supervisor.liveThread?.runtimeSessionID, "rt-2")
     }
@@ -3213,7 +3216,8 @@ extension VoiceConversationControllerTests {
         supervisor.liveCallTranscript = { [] }
         supervisor.beginLiveCall()
         XCTAssertFalse(supervisor.keepsOneChatPerCall)
-        XCTAssertNotNil(await supervisor.makeCallChat(for: "check the build"))
+        let made4 = await supervisor.makeCallChat(for: "check the build")
+        XCTAssertNotNil(made4)
         XCTAssertEqual(fake.created, 0)
         XCTAssertNil(supervisor.liveThread)
     }
@@ -3221,7 +3225,8 @@ extension VoiceConversationControllerTests {
     func testAnAttachedCallsChatIsNotTheCallsOwn() async {
         let (supervisor, fake) = makeOneChatCall()
         supervisor.attachLiveThread(VoiceThreadTarget(runtimeSessionID: "rt-chat", storedSessionID: "st-chat", title: "Build"))
-        XCTAssertNil(await supervisor.makeCallChat(for: "check the build"))
+        let made5 = await supervisor.makeCallChat(for: "check the build")
+        XCTAssertNil(made5)
         XCTAssertEqual(fake.created, 0, "the chat the call started from takes its requests")
         XCTAssertFalse(supervisor.liveThreadIsCallOwned)
         XCTAssertEqual(supervisor.liveThread?.runtimeSessionID, "rt-chat")
