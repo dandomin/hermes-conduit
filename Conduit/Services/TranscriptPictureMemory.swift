@@ -29,6 +29,16 @@ enum TranscriptPictureMemory {
         return cache
     }()
 
+    /// Your attachments' previews, by photo path or kept-picture key,
+    /// downsampled to the display size so a body at streaming frame rate
+    /// never decodes. Here so they go with everything else on a sign-out.
+    static let previews: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 64
+        cache.totalCostLimit = 64 * 1024 * 1024
+        return cache
+    }()
+
     /// Shown sizes by key: a kept picture's cache key, or a photo's path.
     private static var sizes: [String: CGSize] = [:]
     private static var loadedKeptSizes = false
@@ -101,7 +111,10 @@ enum TranscriptPictureMemory {
         pendingSave?.cancel()
         pendingSave = nil
         images.removeAllObjects()
+        previews.removeAllObjects()
         sizes.removeAll()
+        // The next read finds the file gone, so nothing comes back.
+        loadedKeptSizes = false
         io.async { try? FileManager.default.removeItem(at: file) }
     }
 
@@ -143,7 +156,10 @@ enum TranscriptPictureMemory {
         }
     }
 
-    private static func bitmapCost(of image: UIImage) -> Int {
+    /// Estimated decoded byte cost for NSCache. `bytesPerRow * height`
+    /// accounts for the row-alignment padding that a naive
+    /// `width * height * 4` misses.
+    static func bitmapCost(of image: UIImage) -> Int {
         if let cg = image.cgImage {
             return cg.bytesPerRow * cg.height
         }

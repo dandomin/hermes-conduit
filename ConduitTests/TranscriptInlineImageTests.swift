@@ -343,6 +343,33 @@ extension MessageNormalizerTests {
         XCTAssertNil(TranscriptPictureMemory.size(for: "a"))
     }
 
+    @MainActor
+    func testKeptSizesJoinThisLaunchsWithoutWritingOverThem() async throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptImageSizes-\(UUID().uuidString).plist")
+        let elsewhere = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptImageSizes-\(UUID().uuidString).plist")
+        TranscriptPictureMemory.forgetAll(sizesFile: elsewhere)
+        defer {
+            TranscriptPictureMemory.forgetAll(sizesFile: elsewhere)
+            try? FileManager.default.removeItem(at: file)
+        }
+        TranscriptPictureMemory.writeSizes(["kept": CGSize(width: 10, height: 20), "both": CGSize(width: 1, height: 1)], to: file)
+
+        // Remembered before the read: this launch's size wins.
+        TranscriptPictureMemory.rememberSize(CGSize(width: 5, height: 5), for: "both", savingTo: nil)
+        async let first: Void = TranscriptPictureMemory.loadKeptSizes(from: file)
+        async let second: Void = TranscriptPictureMemory.loadKeptSizes(from: file)
+        _ = await (first, second)
+
+        XCTAssertEqual(TranscriptPictureMemory.size(for: "kept"), CGSize(width: 10, height: 20))
+        XCTAssertEqual(TranscriptPictureMemory.size(for: "both"), CGSize(width: 5, height: 5))
+
+        // A sign-out forgets the read too.
+        TranscriptPictureMemory.forgetAll(sizesFile: elsewhere)
+        XCTAssertNil(TranscriptPictureMemory.size(for: "kept"))
+    }
+
     func testPictureSizesAreKeptOnThePhoneAcrossLaunches() throws {
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptImageSizes-\(UUID().uuidString).plist")

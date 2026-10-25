@@ -1716,28 +1716,17 @@ private struct UserImageAttachmentPreview: View {
     @State private var gatewayImageKey: String?
     @State private var opening = false
     @State private var openTask: Task<Void, Never>?
-    @State private var gatewayLoadFailed = false
+    /// The cache key a load from Hermes failed for.
+    @State private var gatewayFailedKey: String?
     @State private var localPreview: UIImage?
     @State private var localPreviewPath: String?
     @State private var localPreviewFailedPath: String?
-
-    /// Body re-evaluates at streaming frame rate, and re-reading + fully
-    /// decoding the file each time hitches scrolling. Previews are downsampled
-    /// to the display size and shared across rows; NSCache evicts them under
-    /// memory pressure. Cost-bounded so a handful of large photos can't
-    /// exhaust it before then.
-    private static let localImageCache: NSCache<NSString, UIImage> = {
-        let cache = NSCache<NSString, UIImage>()
-        cache.countLimit = 64
-        cache.totalCostLimit = 64 * 1024 * 1024
-        return cache
-    }()
 
     /// Cache-only lookup (no decode) so a hit renders on the first frame.
     /// Misses are filled asynchronously — see the `.task` in `body`.
     private var cachedLocalImage: UIImage? {
         guard let key = memoryCacheKey else { return nil }
-        return Self.localImageCache.object(forKey: key as NSString)
+        return TranscriptPictureMemory.previews.object(forKey: key as NSString)
     }
 
     /// The photo's own path when it is on this device, else where a picture
@@ -1756,18 +1745,14 @@ private struct UserImageAttachmentPreview: View {
         return localPreview
     }
 
+    /// True only for a failed load of the *current* picture from Hermes.
+    private var gatewayLoadFailed: Bool {
+        gatewayFailedKey != nil && gatewayFailedKey == gatewayResolver?.imageCacheKey(for: attachment)
+    }
+
     /// True only for a decode failure of the *current* path.
     private var localPreviewFailed: Bool {
         localPreviewFailedPath == localFileURL?.path
-    }
-
-    /// Estimated decoded byte cost for NSCache. `bytesPerRow * height` accounts
-    /// for the row-alignment padding that a naive `width * height * 4` misses.
-    private static func bitmapCost(of image: UIImage) -> Int {
-        if let cg = image.cgImage {
-            return cg.bytesPerRow * cg.height
-        }
-        return Int(image.size.width * image.scale * image.size.height * image.scale) * 4
     }
 
     /// Decodes `url` as a thumbnail sized for the 224pt attachment preview
@@ -1843,7 +1828,7 @@ private struct UserImageAttachmentPreview: View {
                     localPreviewFailedPath = url.path
                     return
                 }
-                Self.localImageCache.setObject(image, forKey: url.path as NSString, cost: Self.bitmapCost(of: image))
+                TranscriptPictureMemory.previews.setObject(image, forKey: url.path as NSString, cost: TranscriptPictureMemory.bitmapCost(of: image))
                 if generation == TranscriptImageCache.generation {
                     TranscriptPictureMemory.rememberSize(image.size, for: url.path)
                 }
@@ -1862,7 +1847,7 @@ private struct UserImageAttachmentPreview: View {
                     return
                 }
                 gatewayImage = nil
-                gatewayLoadFailed = false
+                gatewayFailedKey = nil
                 // Kept on the phone from an earlier load (#652). Read
                 // first: after a sign-out it shows, but isn't remembered.
                 let keptGeneration = TranscriptImageCache.generation
@@ -1891,7 +1876,7 @@ private struct UserImageAttachmentPreview: View {
                 }
                 guard !Task.isCancelled else { return }
                 guard let dataURL, let image = await Self.keep(dataURL, as: cacheKey, generation: generation) else {
-                    gatewayLoadFailed = true
+                    gatewayFailedKey = cacheKey
                     return
                 }
                 guard !Task.isCancelled else { return }
@@ -1906,7 +1891,7 @@ private struct UserImageAttachmentPreview: View {
     }
 
     private func remember(_ image: UIImage, as key: String) {
-        Self.localImageCache.setObject(image, forKey: key as NSString, cost: Self.bitmapCost(of: image))
+        TranscriptPictureMemory.previews.setObject(image, forKey: key as NSString, cost: TranscriptPictureMemory.bitmapCost(of: image))
         TranscriptPictureMemory.rememberSize(image.size, for: key)
         gatewayImage = image
         gatewayImageKey = key
