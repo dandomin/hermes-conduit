@@ -127,6 +127,20 @@ class CheckFeatureMapTests(unittest.TestCase):
         problems = check.unchecked_edits(ENTRY, added, 1201)
         self.assertEqual([p[1].split("'")[1] for p in problems], ["Plan card"])
 
+    def test_an_entry_that_matches_mains_copy_came_from_main(self):
+        """A PR into pulse that merges main brings main's edits with their own
+        Checked lines: given main's map, those aren't the PR's edits."""
+        on_main = ENTRY.replace("only when one item waits", "only when one approval waits").replace("#1\n", "#1188\n")
+        self.assertEqual(len(check.unchecked_edits(ENTRY, on_main, 1201)), 1)
+        self.assertEqual(check.unchecked_edits(ENTRY, on_main, 1201, main_text=on_main), [])
+        added = ENTRY + "\n" + ENTRY.replace("Hermes is waiting on you", "Plan card")
+        self.assertEqual(check.unchecked_edits(ENTRY, added, 1201, main_text=added), [])
+        # The base's own copy still counts as unchanged.
+        self.assertEqual(check.unchecked_edits(ENTRY, ENTRY, 1201, main_text=on_main), [])
+        # Changed again on the way in, it's this PR's edit.
+        edited = on_main.replace("approval waits", "approval is waiting")
+        self.assertEqual(len(check.unchecked_edits(ENTRY, edited, 1201, main_text=on_main)), 1)
+
     def test_main_checks_the_pr_only_when_given_its_base(self):
         edited = ENTRY.replace("only when one item waits", "only when one approval waits")
         with tempfile.TemporaryDirectory() as scratch:
@@ -144,6 +158,23 @@ class CheckFeatureMapTests(unittest.TestCase):
         self.assertIn("Couldn't read the base's map", out)
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             check.main(["--repo-root", ROOT, "--pr", "1201"])
+
+    def test_main_reads_mains_map_for_a_pr_into_another_branch(self):
+        on_main = ENTRY.replace("only when one item waits", "only when one approval waits").replace("#1\n", "#1188\n")
+        with tempfile.TemporaryDirectory() as scratch:
+            base, main_map = os.path.join(scratch, "base.md"), os.path.join(scratch, "main.md")
+            for path, text in ((base, ENTRY), (main_map, on_main)):
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+            pr = ["--pr", "1201", "--base-map", base]
+            self.assertEqual(self.run_check(on_main, extra=pr)[0], 1)
+            code, out = self.run_check(on_main, extra=pr + ["--main-map", main_map])
+            self.assertEqual(code, 0, out)
+            code, out = self.run_check(on_main, extra=pr + ["--main-map", "/nonexistent/main.md"])
+            self.assertEqual(code, 1)
+            self.assertIn("Couldn't read main's map", out)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            check.main(["--repo-root", ROOT, "--main-map", "main.md"])
 
     def test_code_names_at_least_one_path(self):
         code, out = self.run_check(ENTRY.replace("- Chat card: `Conduit/Views/ChatView.swift` (ApprovalCard)\n- Notifier: `notifier/clarify_loop.py`\n", "- Chat card: ApprovalCard\n"))

@@ -11,9 +11,11 @@ one order, so each reads the same: Siblings (listed on that line), Code
 (naming at least one path), Rulings, Open gaps, and a Checked line with the
 date and the PR or commit it was checked at.
 
-On a pull request, CI also passes the PR's number and main's copy of the map:
-an entry the PR adds or edits names that PR on its Checked line, so the line
-says who checked it last, not the commit the branch started from.
+On a pull request, CI also passes the PR's number and the base's copy of the
+map: an entry the PR adds or edits names that PR on its Checked line, so the
+line says who checked it last, not the commit the branch started from. A PR
+into another branch (`pulse`) also gets main's copy where the PR meets main:
+an entry that matches it came in by merging main and keeps main's Checked line.
 
 A notifier file missing on main fails. If GitHub can't be reached at all the
 check warns and passes, so an outage doesn't block every PR.
@@ -132,18 +134,23 @@ def shape_problems(text):
     return problems
 
 
-def unchecked_edits(base_text, text, pr):
+def unchecked_edits(base_text, text, pr, main_text=None):
     """[(line number, problem)] for entries the PR adds or edits whose Checked
-    line doesn't name it."""
+    line doesn't name it. Given main's map (a PR into another branch), an
+    entry that matches main's copy came from main, not from the PR."""
     def body(lines):
         # Blank lines at the end come and go as entries are added after it.
         return "\n".join(line.rstrip() for _, line in lines).strip()
 
-    before = {name.lower(): body(lines) for _, name, lines in entries(base_text)}
+    def bodies(map_text):
+        return {name.lower(): body(lines) for _, name, lines in entries(map_text)}
+
+    before = bodies(base_text)
+    on_main = bodies(main_text) if main_text else {}
     named = re.compile(rf"#{pr}\b")
     problems = []
     for _, name, lines in entries(text):
-        if before.get(name.lower()) == body(lines):
+        if body(lines) in (before.get(name.lower()), on_main.get(name.lower())):
             continue
         checked = [(n, line) for n, line in lines if line.startswith(PARTS[4])]
         if checked and not named.search(checked[0][1]):
@@ -180,9 +187,14 @@ def main(argv=None):
     parser.add_argument("--pr", type=int,
                         help="the pull request's number: entries it adds or edits name it")
     parser.add_argument("--base-map", help="the map on the PR's base, to tell which entries it edits")
+    parser.add_argument("--main-map",
+                        help="for a PR into another branch, the map on main where the PR meets it: "
+                             "entries that match it came from main")
     args = parser.parse_args(argv)
     if bool(args.pr) != bool(args.base_map):
         parser.error("--pr and --base-map go together")
+    if args.main_map and not args.pr:
+        parser.error("--main-map goes with --pr and --base-map")
 
     try:
         with open(os.path.join(args.repo_root, MAP), encoding="utf-8") as fh:
@@ -199,7 +211,15 @@ def main(argv=None):
         except OSError as error:
             print(f"::error::Couldn't read the base's map {args.base_map} ({error.strerror}).")
             return 1
-        problems += unchecked_edits(base_text, text, args.pr)
+        main_text = None
+        if args.main_map:
+            try:
+                with open(args.main_map, encoding="utf-8") as fh:
+                    main_text = fh.read()
+            except OSError as error:
+                print(f"::error::Couldn't read main's map {args.main_map} ({error.strerror}).")
+                return 1
+        problems += unchecked_edits(base_text, text, args.pr, main_text)
     notifier = {}
     found = paths(text)
     for number, path in found:

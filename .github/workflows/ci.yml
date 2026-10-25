@@ -121,9 +121,15 @@ jobs:
         # docs/FEATURE_MAP.md tells a change which siblings to update and
         # where their code lives; a path that moved would send it to the
         # wrong file. notifier/ paths are checked on the plugin's main. On a
-        # PR, an entry it adds or edits names it on its Checked line.
+        # PR, an entry it adds or edits names it on its Checked line. A PR
+        # into pulse also passes main's map where the PR meets main (their
+        # merge base): the entries a merge of main brings in match it and
+        # keep main's Checked lines.
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ -n "$PR_NUMBER" ]; then
@@ -131,8 +137,19 @@ jobs:
               echo "::error::Couldn't read docs/FEATURE_MAP.md at HEAD^1, the PR's base."
               exit 1
             fi
+            main_map=()
+            if [ "$BASE_REF" != "main" ]; then
+              if ! meets=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$HEAD_SHA" --jq .merge_base_commit.sha) \
+                  || [ -z "$meets" ] \
+                  || ! git fetch --no-tags --depth=1 origin "$meets" \
+                  || ! git show FETCH_HEAD:docs/FEATURE_MAP.md > "$RUNNER_TEMP/main-map.md"; then
+                echo "::error::Couldn't read docs/FEATURE_MAP.md on main where the PR meets it (${meets:-no merge base})."
+                exit 1
+              fi
+              main_map=(--main-map "$RUNNER_TEMP/main-map.md")
+            fi
             python3 scripts/check-feature-map.py --repo-root . \
-              --pr "$PR_NUMBER" --base-map "$RUNNER_TEMP/base-map.md"
+              --pr "$PR_NUMBER" --base-map "$RUNNER_TEMP/base-map.md" "${main_map[@]}"
           else
             python3 scripts/check-feature-map.py --repo-root .
           fi
