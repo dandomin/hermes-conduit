@@ -1670,6 +1670,7 @@ Settings caption, briefing or doc says how pictures load)
 **Open gaps**
 - A picture never loaded on this phone, or kept by a build before #1239 and not shown since, still mounts as a loading line and grows once.
 - Group rooms show no `MEDIA:` pictures: their Markdown has no gateway resolver.
+- Past 4,000 remembered sizes the memo starts again (no LRU), so pictures grow once more until each loads again.
 
 **Checked:** 2026-10-25, at #1239.
 

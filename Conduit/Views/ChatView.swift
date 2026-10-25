@@ -1834,6 +1834,7 @@ private struct UserImageAttachmentPreview: View {
             // off the MainActor so a large photo can't hitch scrolling.
             if let url = localFileURL {
                 guard currentLocalPreview == nil, cachedLocalImage == nil else { return }
+                let generation = TranscriptImageCache.generation
                 let image = await Task.detached(priority: .userInitiated) { () -> UIImage? in
                     Self.downsampledPreview(url: url)
                 }.value
@@ -1843,7 +1844,9 @@ private struct UserImageAttachmentPreview: View {
                     return
                 }
                 Self.localImageCache.setObject(image, forKey: url.path as NSString, cost: Self.bitmapCost(of: image))
-                TranscriptPictureMemory.rememberSize(image.size, for: url.path)
+                if generation == TranscriptImageCache.generation {
+                    TranscriptPictureMemory.rememberSize(image.size, for: url.path)
+                }
                 localPreview = image
                 localPreviewPath = url.path
                 // A picture from Hermes. The local-file branch returns above,
