@@ -3280,3 +3280,17 @@ extension VoiceConversationControllerTests {
         XCTAssertNil(supervisor.liveThread)
     }
 }
+
+@MainActor
+extension VoiceConversationControllerTests {
+    func testAnUnattachedCallsBriefingSaysItKeepsOneChat() {
+        let tools = AppState.liveVoiceCallChatInstructions(delegation: false)
+        XCTAssertTrue(tools.contains("one Hermes chat"))
+        XCTAssertTrue(tools.contains("start_job"), "Gemini, Qwen, Grok and Local Live have no ask_thread on such a call")
+        XCTAssertFalse(tools.contains("ask_thread"))
+        let delegations = AppState.liveVoiceCallChatInstructions(delegation: true)
+        XCTAssertTrue(delegations.contains("one Hermes chat"))
+        XCTAssertTrue(delegations.contains("\"Quick:\""))
+        XCTAssertFalse(delegations.contains("start_job"))
+    }
+}

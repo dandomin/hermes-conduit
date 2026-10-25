@@ -410,6 +410,21 @@ final class VoiceBackgroundJobSupervisor: ObservableObject, VoiceBackgroundJobHa
     /// the minimised call's bar can name it.
     @Published var liveThread: VoiceThreadTarget?
 
+    /// Whether a call that started without a chat makes one for its first
+    /// ordinary request and sends its later ones there as that chat's next
+    /// turns (#1250), instead of a new background job for each. Set per
+    /// call by `beginLiveCall`; a hang-up lets go of it.
+    private(set) var keepsOneChatPerCall = false
+    /// Whether `liveThread` is the chat this call made for itself, rather
+    /// than the one it was started from.
+    @Published private(set) var liveThreadIsCallOwned = false
+    /// Moves on at every call start and hang-up, so a chat still being
+    /// made when the call ended is never attached to the next one.
+    private var callChatEpoch: UInt64 = 0
+    /// The call's chat being made: requests said meanwhile wait for it
+    /// rather than make another.
+    private var callChatCreation: (epoch: UInt64, task: Task<VoiceThreadTarget?, Never>)?
+
     /// A note waiting for the call. A screenshot note carries its
     /// screenshot's attachment URI, so removing that screenshot finds it.
     private struct ChatNote {
@@ -543,11 +558,15 @@ final class VoiceBackgroundJobSupervisor: ObservableObject, VoiceBackgroundJobHa
     }
 
     /// A new live call begins: jobs started from now on are its own.
-    func beginLiveCall(asksBeforeSending: Bool = false) {
+    func beginLiveCall(asksBeforeSending: Bool = false, keepsOneChat: Bool = false) {
         // A call that never hung up lets go of its work first (#449).
         if callbackCallID != nil { finishCallbacks() }
         let callID = UUID()
         liveCallID = callID
+        callChatEpoch &+= 1
+        callChatCreation = nil
+        // A call started from a chat sends its work there instead.
+        keepsOneChatPerCall = keepsOneChat && liveThread == nil
         liveCallStartedAt = Date()
         self.asksBeforeSending = asksBeforeSending
         callbackCallID = callID
@@ -1615,6 +1634,49 @@ final class VoiceBackgroundJobSupervisor: ObservableObject, VoiceBackgroundJobHa
         liveThread = thread
     }
 
+    /// Makes the chat a call that started without one keeps its requests in
+    /// (#1250), when it has none yet: an ordinary Hermes session, titled
+    /// after the first request, which `startThreadTurn` then sends to. Nil
+    /// when the call has its chat, or what to tell the user when it can't.
+    /// A call that doesn't keep one chat gets a refusal: its requests go
+    /// as background jobs.
+    func makeCallChat(for request: String) async -> String? {
+        if liveThread != nil { return nil }
+        guard keepsOneChatPerCall else {
+            return AppLocalization.string("This call isn't attached to a chat.")
+        }
+        let epoch = callChatEpoch
+        let task: Task<VoiceThreadTarget?, Never>
+        if let pending = callChatCreation, pending.epoch == epoch {
+            task = pending.task
+        } else {
+            let backend = backend
+            let title = Self.title(for: request)
+            task = Task { @MainActor in
+                guard let ids = try? await backend.createSession(nil), !ids.runtimeID.isEmpty else { return nil }
+                await backend.setTitle(ids.runtimeID, title)
+                return VoiceThreadTarget(runtimeSessionID: ids.runtimeID, storedSessionID: ids.storedID, title: title)
+            }
+            callChatCreation = (epoch, task)
+        }
+        let made = await task.value
+        if callChatCreation?.epoch == epoch { callChatCreation = nil }
+        // Hung up, or attached elsewhere, while Hermes made it: the chat
+        // stays on Hermes, but no later call sends to it.
+        guard epoch == callChatEpoch else {
+            return AppLocalization.string("The call ended before Hermes could take this.")
+        }
+        // Another request said meanwhile attached it already.
+        if liveThread != nil { return nil }
+        guard let made else {
+            return AppLocalization.string("Hermes could not start a chat for this call.")
+        }
+        liveThread = made
+        liveThreadIsCallOwned = true
+        onJobSessionCreated?([made.runtimeSessionID, made.storedSessionID].compactMap { $0 }.filter { !$0.isEmpty })
+        return nil
+    }
+
     /// A call that says nothing but its own replies (Local Live) drops what
     /// would be said to it: notes on the attached chat's turns, its own turns
     /// among them, and any job update.
@@ -1629,6 +1691,10 @@ final class VoiceBackgroundJobSupervisor: ObservableObject, VoiceBackgroundJobHa
 
     func detachLiveThread() {
         liveThread = nil
+        liveThreadIsCallOwned = false
+        keepsOneChatPerCall = false
+        callChatEpoch &+= 1
+        callChatCreation = nil
         chatNotes.removeAll()
         callChatPrompts.removeAll()
         screenshotNotesHeard.removeAll()
@@ -2027,6 +2093,10 @@ final class VoiceBackgroundJobSupervisor: ObservableObject, VoiceBackgroundJobHa
         followUpsInFlight.removeAll()
         noticesInFlight.removeAll()
         liveThread = nil
+        liveThreadIsCallOwned = false
+        keepsOneChatPerCall = false
+        callChatEpoch &+= 1
+        callChatCreation = nil
         liveCallID = nil
         liveCallStartedAt = nil
         callOpening = nil

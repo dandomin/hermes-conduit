@@ -69,6 +69,12 @@ protocol GeminiLiveJobSupervising: AnyObject {
     func noticeSent(jobID: UUID)
     /// The chat the call is attached to, if any.
     var liveThread: VoiceThreadTarget? { get }
+    /// Whether a call that started without a chat keeps its ordinary
+    /// requests in one chat it makes for them (#1250).
+    var keepsOneChatPerCall: Bool { get }
+    /// Makes that chat when the call has none yet; nil once it has one,
+    /// else what to tell the user.
+    func makeCallChat(for request: String) async -> String?
     func startThreadTurn(request: String) -> (jobID: UUID?, refusal: String?)
     /// Whether `instructions` open with another profile ("for Fam, …").
     func namesOtherProfile(_ instructions: String) -> Bool
@@ -122,6 +128,10 @@ protocol GeminiLiveJobSupervising: AnyObject {
 /// Without follow-up support a request never takes one: the words go out
 /// as new work, as before #451.
 extension GeminiLiveJobSupervising {
+    var keepsOneChatPerCall: Bool { false }
+    func makeCallChat(for request: String) async -> String? {
+        liveThread == nil ? "This call isn't attached to a chat." : nil
+    }
     func threadFollowUpTarget() -> UUID? { nil }
     func backgroundJob(numbered number: Int) -> VoiceBackgroundJob? { nil }
     func followUp(jobID: UUID, words: String, kind: String?) async -> VoiceFollowUpOutcome { .finished(title: "") }
@@ -622,6 +632,12 @@ final class GeminiLiveToolBridge {
             }
         }
         if !confirmed, let held = heldForOK(call, request: request, profile: "", toChat: true) { return held }
+        // A call without a chat makes its own for the first request it sends.
+        if let refusal = await supervisor.makeCallChat(for: request) {
+            guard !isEnding else { return [] }
+            return [.toolResponse(id: call.id, name: call.name, result: ["status": "not_sent", "message": refusal], scheduling: .whenIdle)]
+        }
+        guard !isEnding else { return [] }
         let sent = supervisor.startThreadTurn(request: request)
         guard let jobID = sent.jobID else {
             return [.toolResponse(id: call.id, name: call.name, result: ["status": "not_sent", "message": sent.refusal ?? "Hermes couldn't take the request."], scheduling: .whenIdle)]
@@ -708,9 +724,11 @@ final class GeminiLiveToolBridge {
             // Attached to a chat, work goes to that chat unless the user asked
             // for a background job (or "quick" work) or another profile. The
             // model reaches for start_job out of habit; routing here keeps the
-            // chat's work in the chat whichever tool it picks.
+            // chat's work in the chat whichever tool it picks. A call that
+            // started without a chat keeps its work in one chat of its own
+            // the same way (#1250).
             let profile = call.arguments["profile"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if supervisor.liveThread != nil, profile.isEmpty,
+            if supervisor.liveThread != nil || supervisor.keepsOneChatPerCall, profile.isEmpty,
                !VoiceThreadRouting.wantsBackgroundJob(instructions), !supervisor.namesOtherProfile(instructions) {
                 return await sendToThread(call, request: instructions)
             }
@@ -751,11 +769,11 @@ final class GeminiLiveToolBridge {
                 return [.toolResponse(id: call.id, name: call.name, result: ["status": "dropped", "message": "Not sent: the user said no, so it won't go to Hermes. Tell them in a few words."], scheduling: .whenIdle)]
             case .no(let change?), .notYet(let change?):
                 draft = nil
-                return [.toolResponse(id: call.id, name: call.name, result: ["status": "changed", "message": "Not sent: the user changed it (\"\(change)\"). Call \(waiting.toChat ? Tool.askThread.rawValue : Tool.startJob.rawValue) again with the request as they want it now."], scheduling: .whenIdle)]
+                return [.toolResponse(id: call.id, name: call.name, result: ["status": "changed", "message": "Not sent: the user changed it (\"\(change)\"). Call \(waiting.toChat && !supervisor.keepsOneChatPerCall ? Tool.askThread.rawValue : Tool.startJob.rawValue) again with the request as they want it now."], scheduling: .whenIdle)]
             case .notYet(nil):
                 return [.toolResponse(id: call.id, name: call.name, result: ["status": "waiting_for_ok", "message": "Not sent: the user isn't ready yet. Wait for their OK, then call send_request."], scheduling: .silent)]
             case .other:
-                return [.toolResponse(id: call.id, name: call.name, result: ["status": "waiting_for_ok", "message": "Not sent: the user's answer wasn't a yes. If they changed the request, call \(waiting.toChat ? Tool.askThread.rawValue : Tool.startJob.rawValue) again with it; otherwise ask whether to send it, and call send_request once they say yes."], scheduling: .whenIdle)]
+                return [.toolResponse(id: call.id, name: call.name, result: ["status": "waiting_for_ok", "message": "Not sent: the user's answer wasn't a yes. If they changed the request, call \(waiting.toChat && !supervisor.keepsOneChatPerCall ? Tool.askThread.rawValue : Tool.startJob.rawValue) again with it; otherwise ask whether to send it, and call send_request once they say yes."], scheduling: .whenIdle)]
             }
             draft = nil
             let approved = GeminiLiveProtocol.FunctionCall(
@@ -844,7 +862,9 @@ final class GeminiLiveToolBridge {
             guard let id = UUID(uuidString: rawID),
                   supervisor.jobs.contains(where: { $0.id == id && !$0.isThreadTurn }) else {
                 // Not UI copy, so not localized.
-                let chat = supervisor.liveThread == nil ? "" : " For work in the attached chat, use ask_thread."
+                let chat = supervisor.liveThread == nil ? ""
+                    : supervisor.keepsOneChatPerCall ? " For work in this call's chat, use start_job."
+                    : " For work in the attached chat, use ask_thread."
                 return [.toolResponse(id: call.id, name: call.name, result: ["error": "Unknown job_id. Call list_jobs for the jobs' ids." + chat], scheduling: .whenIdle)]
             }
             guard !words.isEmpty else {

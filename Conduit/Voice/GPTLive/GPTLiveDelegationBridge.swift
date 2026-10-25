@@ -487,7 +487,21 @@ final class GPTLiveDelegationBridge {
         // were when it was released.
         if !confirmed { spokenWords?.settleWords(.all) }
         let routingWords = instructions.components(separatedBy: GPTLiveConversationController.delegationContextMarker).first ?? instructions
-        if supervisor.liveThread != nil, !VoiceThreadRouting.wantsBackgroundJob(routingWords) {
+        // A call that started without a chat keeps its work in one chat of
+        // its own (#1250), made for the first request it sends; asking for a
+        // background job, or work on another profile, still starts a job.
+        if supervisor.liveThread == nil, supervisor.keepsOneChatPerCall,
+           !VoiceThreadRouting.wantsBackgroundJob(routingWords), !supervisor.namesOtherProfile(routingWords) {
+            let refusal = await supervisor.makeCallChat(for: instructions)
+            guard callGeneration == call, !isEnding else { return [] }
+            if let refusal {
+                if confirmed { lastSentAt = nil }
+                lastUntaken = id
+                return [.delegationReply(delegationID: id, text: Self.relay(refusal), channel: .speakable)]
+            }
+        }
+        if supervisor.liveThread != nil, !VoiceThreadRouting.wantsBackgroundJob(routingWords),
+           !(supervisor.keepsOneChatPerCall && supervisor.namesOtherProfile(routingWords)) {
             let sent = supervisor.startThreadTurn(request: instructions)
             guard let jobID = sent.jobID else {
                 if confirmed { lastSentAt = nil }
