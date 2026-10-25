@@ -2258,10 +2258,14 @@ private struct RemoteMarkdownImage: View {
             gatewayLoadFailed = false
             let maxPixelSize = Self.remoteMaxPixelSize
             // Kept on the phone from an earlier load: no request, and the
-            // read and decode stay off the main thread.
+            // read and decode stay off the main thread. After a sign-out
+            // it shows, but isn't remembered.
+            let keptGeneration = TranscriptImageCache.generation
             if let cacheKey, let kept = await Self.keptGatewayImage(cacheKey, maxPixelSize: maxPixelSize) {
                 guard !Task.isCancelled else { return }
-                TranscriptPictureMemory.remember(kept, for: cacheKey)
+                if keptGeneration == TranscriptImageCache.generation {
+                    TranscriptPictureMemory.remember(kept, for: cacheKey)
+                }
                 gatewayImage = kept
                 gatewayImageKey = cacheKey
                 return

@@ -70,7 +70,10 @@ enum TranscriptPictureMemory {
         loadedKeptSizes = true
         let started = generation
         let kept = await Task.detached(priority: .utility) { readSizes(from: file) }.value
-        guard generation == started else { return }
+        guard generation == started else {
+            loadedKeptSizes = false
+            return
+        }
         let room = max(0, sizeLimit - sizes.count)
         for (key, size) in kept.prefix(room) where sizes[key] == nil {
             sizes[key] = size

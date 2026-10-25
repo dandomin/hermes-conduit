@@ -1860,10 +1860,17 @@ private struct UserImageAttachmentPreview: View {
                 }
                 gatewayImage = nil
                 gatewayLoadFailed = false
-                // Kept on the phone from an earlier load (#652).
+                // Kept on the phone from an earlier load (#652). Read
+                // first: after a sign-out it shows, but isn't remembered.
+                let keptGeneration = TranscriptImageCache.generation
                 if let image = await Self.keptPreview(for: cacheKey) {
                     guard !Task.isCancelled else { return }
-                    remember(image, as: cacheKey)
+                    if keptGeneration == TranscriptImageCache.generation {
+                        remember(image, as: cacheKey)
+                    } else {
+                        gatewayImage = image
+                        gatewayImageKey = cacheKey
+                    }
                     return
                 }
                 guard !Task.isCancelled else { return }

@@ -1665,7 +1665,7 @@ Settings caption, briefing or doc says how pictures load)
 
 **Rulings**
 - A row never changes height when its picture arrives, if the picture has loaded on this phone before: its size is remembered (kept next to the pictures, read once off the main thread) and its placeholder takes it (2026-10-25, #1239, #1238).
-- Reading, decoding and keeping a picture, and its size, stay off the main thread: a body looks pictures and sizes up in memory only (a local photo's existence check is the one file call left there). A picture kept on the phone is never fetched again (2026-10-25, #1239).
+- Reading, decoding and keeping a picture, and its size, stay off the main thread: a body looks pictures and sizes up in memory only (a local photo's existence is still checked there: a stat, never a picture read). A picture kept on the phone is never fetched again (2026-10-25, #1239).
 
 **Open gaps**
 - A picture never loaded on this phone, or kept by a build before #1239 and not shown since, still mounts as a loading line and grows once.
