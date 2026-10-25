@@ -134,13 +134,13 @@ the outcome text each model is told
 **Rulings**
 - The voice model judges what the user meant, Conduit enforces and routes it, and Hermes reads the user's own words (2026-10-08, #451).
 - "Add" goes as `session.steer`; "change", hold and cancel go as `session.redirect`. No kind, or a refused steer, falls back to redirect. The same in every live mode (2026-10-21, #1157).
-- An unattached call with one running job and no job number follows up into that job; "New job:" starts another (2026-10-09, #472).
+- An unattached call with one running job and no job number follows up into that job; "New job:" starts another (2026-10-09, #472). Once the call has its own chat, a correction goes into that chat's running reply as in an attached call; this rule covers only the background jobs it still starts (2026-10-25, #1253).
 - Steering in the chat never waits for an OK (2026-10-08, #451).
 
 **Open gaps**
 - After a steer the model is still told Hermes "changes course now": steer and redirect both end as `.interrupted`, and the text has four copies, in `Conduit/Voice/GeminiLive/GeminiLiveToolBridge.swift`, `Conduit/Voice/GPTLive/GPTLiveDelegationBridge.swift`, `Shared/WatchVoice/WatchJobRelay.swift` and `Shared/WatchVoice/WatchBridgeDelegation.swift` (#1157).
 
-**Checked:** 2026-10-25, Qwen in the siblings and the table, at #1182, carried in #1235; 2026-10-23, seeded from main at 64d53c3.
+**Checked:** 2026-10-25, at #1253, for an unattached call's own chat; Qwen in the siblings and the table, at #1182, carried in #1235; 2026-10-23, seeded from main at 64d53c3.
 
 ## Job results during calls
 
@@ -240,9 +240,10 @@ entry)
 - Watch: `ConduitWatch/WatchHomeView.swift`, `ConduitWatch/TalkToHermesIntent.swift`
 - A chat open elsewhere: `Conduit/Services/ChatTakeover.swift` (ChatTakeoverPreference), `Conduit/Services/AppState.swift` (submitComposerForCall, sendCallPromptTakingOver)
 - How an attached call behaves: `docs/VOICE_BACKGROUND_JOBS.md`
+- An unattached call's own chat: `Conduit/Voice/VoiceBackgroundJobs.swift` (makeCallChat, keepsOneChatPerCall), `Conduit/Voice/GeminiLive/GeminiLiveToolBridge.swift` (sendToThread), `Conduit/Voice/GPTLive/GPTLiveDelegationBridge.swift` (send)
 
 **Rulings**
-- A live call started from a chat joins that chat for the whole call, and its requests become the chat's turns; started anywhere else, it stands alone (2026-10-02, #312). An empty chat counts as a chat (2026-10-16, #679).
+- A live call started from a chat joins that chat for the whole call, and its requests become the chat's turns (2026-10-02, #312). Started anywhere else, it makes one chat of its own on its first ordinary request and keeps the call's requests there until it ends; background work, quick work and another profile's work still start jobs (2026-10-25, #1253, for #1250; this replaces "it stands alone" from #312). An empty chat counts as a chat (2026-10-16, #679).
 - In a chat with a saved call, the voice button resumes that call (2026-10-16, #679).
 - A call always takes over a chat that Desktop holds, whatever the setting, and "Take over automatically" is on by default (2026-10-21, #1066).
 - Classic can't start while a reply runs; live calls start beside it (2026-10-18, #767).
@@ -252,8 +253,9 @@ entry)
 **Open gaps**
 - Group rooms have no voice button setting, and the Watch and CarPlay don't follow it (#1134).
 - When a Classic call can't take over its chat, it shows a generic error (#1066).
+- A Watch call still runs each request as its own job: `WatchCallJobSupervisor` doesn't make a chat of its own (#1253).
 
-**Checked:** 2026-10-25, Qwen starts through the shared controller, at #1182, carried in #1235; 2026-10-24, at #1223, for a start's late answers and CarPlay's mode switch; 2026-10-23, seeded from main at 64d53c3.
+**Checked:** 2026-10-25, at #1253, for an unattached call's own chat; Qwen starts through the shared controller, at #1182, carried in #1235; 2026-10-24, at #1223, for a start's late answers and CarPlay's mode switch; 2026-10-23, seeded from main at 64d53c3.
 
 ## Ending a call and what gets saved
 
